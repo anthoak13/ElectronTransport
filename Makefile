@@ -1,11 +1,16 @@
+# Executable name to build
+EXECNAME=transport
+
+
 INCLDIR = include
 SRCDIR = src
 BUILDDIR = build
 
-EXECNAME=transport
 
-# Assume each header represents an object to build
+# Assume each header with extension .h represents an object to build
+# Headers with extension .hh have no corresponding cpp class
 INCLS = $(wildcard $(INCLDIR)/*.h)
+INCLS += $(wildcard $(INCLDIR)/*.hh)
 OBJECTS = $(patsubst $(INCLDIR)%, $(BUILDDIR)%, $(filter %.o, $(INCLS:.h=.o )))
 
 SRCS  = $(wildcard $(SRCDIR)/*.cpp)
@@ -31,6 +36,7 @@ $(EXECNAME): $(BUILDDIR)/$(EXECNAME).o $(OBJECTS)
 $(BUILDDIR)/%.o : $(SRCDIR)/%.cpp
 	$(COMPILER) $(CFLAGS) $< -o $@
 
+.PHONY: clean
 clean:
 	rm -f $(BUILDDIR)/*.o $(EXECNAME)
 

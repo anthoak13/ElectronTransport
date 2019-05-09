@@ -18,41 +18,23 @@
  * Adam Anthony 5/2/2019
  */
 
-#include <cmath>
 #include <iostream>
 #include <string>
 
 #include <TApplication.h>
 #include <TCanvas.h>
 #include <TGraph.h>
-#include <TMath.h>
 #include <TROOT.h>
 #include <TString.h>
 
-//Function definitions
-constexpr
-double pow(double base, int exp) noexcept
-{
-  double result = 1.0;
-  if (exp > 0)
-    for (int i = 0; i < exp; ++i)
-      result *= base;
-  else
-    for (int i = 0; i < -exp; ++i)
-      result /= base;
-  return result;
-}
+#include "Constants.hh"
+#include "ConstField.h"
+#include "Particle.h"
+
 
 //Define fundemental constants
-constexpr auto e = 1.6021766208 * pow(10, -19);
-constexpr auto m = 9.10938356   * pow(10,-31);
-constexpr auto c = 299792458;
-constexpr auto kgToEv = 5.60958865 * pow(10,35);
+auto m = 9.10938356   * pow(10,-31);
 
-double yPos(double E, double B, double t,
-	    double *pos, double *vel);
-double zPos(double E, double B, double t,
-	    double *pos, double *vel);
 void usage();
 
 //Main function
@@ -60,94 +42,93 @@ int main(int argc, char *argv[])
 {
   TApplication app("app", &argc, argv);
 
+  //Make sure the user passed the right number of argumetns
   if(argc != 5)
   {
     usage();
     return 1;
   }
   
-  
-  
-  //Set the initial conditions
+  //Parse the comand line arguments
   double V     = std::stod(argv[2]); //Voltage in volts
   double B     = std::stod(argv[3]); //B-field in gaus
   double En    = std::stod(argv[1]); //in eV
   double VFoil = std::stod(argv[4]); //Voltage on the foil
 
-  //Add the energy from accelerating to the foil
-  double EnAtGND = En +VFoil;
-  
-  //Get the electron velocity from KE
-  double v = TMath::Sqrt(2*EnAtGND/(m*kgToEv))*c;
-  double pos[3] = {0,0,0};
-  double vel[3] = {0,0, -v};
+  //Get the E anf B field from the geometry
   double E = V/(1.6*2.54/100.);
   B *= pow(10,-4);
 
-  //Print out the speed of the electons
-  std::cout <<"Electron moving at " << v << "m/s" << std::endl;
+  //Create the field and the particle
+  ConstField *field = new ConstField(E,B);
 
-  std::cout << E << " " << B << std::endl;
+  //Create an electron with mass 511keV and charge 1e
+  Particle electron(511000, -1);
+
+  /*** This makes an assumtion that the particle is emited perpendicular to
+   *   the foil. This is wrong and an angular distribution will have
+   *   to be added later
+   ***/
+  //Add the energy from accelerating to the foil
+  double EnAtGND = En + VFoil;
+  //Get the electron velocity from KE
+  double v = TMath::Sqrt(2*EnAtGND/(m*kgToEv))*c;
+
+  //Set the timestep and the max time to simulate
+  double dT = 0.1; //Timestep (ns)
+  double time = 10; //Time to simulate (ns)
   
-  //Run from 0 to 100 ns
-  int nSample = 1000;
+  /*** Basic setup is done ***/
+  /** This is where the loop for a monte-carlo would start **/
+  
+  //Set the initial conditions of the particle
+  double vel[3] = {0, 0, -v};
+  double pos[3] = {0, 0, 0};
+  electron.setPosition(pos);
+  electron.setVelocity(vel);
+
+  //Get the number of sa,ples from the timestep
+  int nSample = (int)time/dT;
   Double_t z[nSample], y[nSample], t[nSample]; 
 
-  //Found collision
-  bool col = false;
-
-  //Loop through and populate positions, also look for colision location
+  // Loop through and populate positions
+  // Stops looping if it hits the wall
+  int numTSteps = 0;
   for(int i = 0; i < nSample; ++i)
   {
-    //t runs from 0 to 100 ns
-    t[i] = i*pow(10,-10);
-    y[i] = yPos(E,B,t[i],pos,vel);
-    z[i] = -zPos(E,B,t[i],pos,vel);
+    t[i] = i*dT*pow(10,-9); //Convert from ns to seconds
 
-    if( !col && z[i] < 0 )
-    {
-      col = true;
-      std::cout << "Hit wall at " << y[i]*100 << " cm in " << t[i]*pow(10,9) << " ns"
-		<< std::endl;
-    }
-  }
+    //Get the position at this point and record it
+    double *pos = electron.getPosition(t[i], field);
+    y[i] = pos[1];
+    z[i] = -pos[2];
 
+    /*std::cout << "At " << t[i] << " s " << " the particle is at ("
+	      << y[i] << ", " << z[i] << ")" << std::endl;
+    */
+
+    //clean up the memory used by pos;
+    delete [] pos;
+
+    //If we've hit the wall, break from the loop
+    if(z[i] < 0 && numTSteps == 0)
+      numTSteps = i;
+  }// End loop over number of samples
+
+  std::cout << "The particle hit the wall after "
+	    << numTSteps * dT << " ns." << std::endl;
+  
   //Create the canvas to hold the graph
   TCanvas *c1 = new TCanvas("c1", "Top-down projection", 500, 300);
+
   //Create the graph and draw it
-  TGraph *gr = new TGraph(100,y,z);
+  TGraph *gr = new TGraph(nSample,y,z);
   gr->SetTitle(Form("En: %f, V: %f, VFoil: %f, B: %f", En, V, VFoil, B));
   gr->Draw("AC*");
   
   app.Run(kTRUE);
 
   return 0;
-}
-
-double yPos(double E, double B, double t,
-	    double *pos, double *vel)
-{
-  //Setup the constant for the calculation
-  const double w = -e*B/m;
-  const double D1 = -vel[2]/w;
-  const double D2 = 1./w*(vel[1] - E/B);
-  const double D3 = pos[1] - D1;
-  const double D4 = -D2;
-
-  return E/B*t + D1*TMath::Cos(w*t) + D2*TMath::Sin(w*t) + D3;
-}
-
-double zPos(double E, double B, double t,
-	    double *pos, double *vel)
-{
-  //Setup the constant for the calculation
-  const double w = -e*B/m;
-  const double D1 = -vel[2]/w;
-  const double D2 = 1./w*(vel[1] - E/B);
-  const double D3 = pos[1] - D1;
-  const double D4 = -D2;
-
-  return D2*TMath::Cos(w*t) - D1*TMath::Sin(w*t) + D4;
 }
 
 void usage()
